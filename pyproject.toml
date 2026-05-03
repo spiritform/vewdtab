@@ -1,0 +1,13 @@
+[project]
+name = "vewdtab"
+description = "Side panel companion to Vewd. A persistent right-side tab for reviewing, hearting, and exporting generated media — auto-captures images, video, audio, 3D, and splats from any workflow."
+version = "0.1.0"
+license = { file = "LICENSE" }
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/spiritform/vewdtab"
+
+[tool.comfy]
+PublisherId = "spiritform"
+DisplayName = "Vewd Tab"
