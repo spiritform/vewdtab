@@ -119,7 +119,7 @@ styleEl.textContent = `
     #${PANEL_ID} .v2-resize:hover,
     body.vewd2-resizing #${PANEL_ID} .v2-resize { background: rgba(255,255,255,0.08); }
 
-    #${PANEL_ID} .v2-count { color: #666; font-size: 11px; flex-shrink: 0; }
+    #${PANEL_ID} .v2-count { color: #666; font-size: 11px; flex-shrink: 0; min-width: 12px; text-align: center; }
 
     #${PANEL_ID} .v2-preview {
         background: #0a0a0a;
@@ -694,7 +694,7 @@ function renderPreview(entry) {
 
 function updateCount() {
     const el = document.querySelector(`#${PANEL_ID} .v2-count`);
-    if (el) el.textContent = String(state.items.length);
+    if (el) el.textContent = state.items.length === 0 ? "" : String(state.items.length);
 }
 
 function clearAll() {
@@ -813,7 +813,7 @@ function buildPanel() {
         </div>
         <div class="v2-grid-area"><div class="v2-grid"></div></div>
         <div class="v2-toolbar">
-            <span class="v2-count">0</span>
+            <span class="v2-count"></span>
             <button data-filter="all" class="active">all</button>
             <button data-filter="image">img</button>
             <button data-filter="video">vid</button>
