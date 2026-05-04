@@ -180,14 +180,14 @@ styleEl.textContent = `
         border-bottom: 1px solid #222;
         font-size: 11px;
     }
-    #${PANEL_ID} .v2-folder-row label { color: #777; flex-shrink: 0; }
-    #${PANEL_ID} .v2-folder-row input {
+    #${PANEL_ID} .v2-actions label { color: #777; flex-shrink: 0; font-size: 11px; }
+    #${PANEL_ID} .v2-actions input[type="text"] {
         flex: 1; min-width: 0;
         background: #1a1a1a; border: 1px solid #2a2a2a;
         color: #ccc; font-family: inherit; font-size: 11px;
         padding: 4px 8px; border-radius: 3px;
     }
-    #${PANEL_ID} .v2-folder-row input:focus { outline: none; border-color: #444; color: #fff; }
+    #${PANEL_ID} .v2-actions input[type="text"]:focus { outline: none; border-color: #444; color: #fff; }
 
     #${PANEL_ID} .v2-grid-area {
         flex: 1; min-height: 0;
@@ -800,14 +800,14 @@ function buildPanel() {
         <button class="v2-handle" title="Toggle Vewd">vewd</button>
         <div class="v2-resize" title="Drag to resize"></div>
         <div class="v2-folder-row">
-            <label>folder</label>
-            <input id="vewd2-folder" type="text" placeholder="e.g. C:/AI/comfy/output/vewd" spellcheck="false">
+            <span class="v2-filename">no selection</span>
             <button id="vewd2-preview-toggle" class="v2-icon-btn" title="Hide / show preview"><span class="pi pi-chevron-up"></span></button>
         </div>
         <div class="v2-preview"><div class="v2-empty">no media</div></div>
         <div class="v2-hsplit" title="Drag to resize"></div>
         <div class="v2-actions">
-            <span class="v2-filename">no selection</span>
+            <label>folder</label>
+            <input id="vewd2-folder" type="text" placeholder="e.g. C:/AI/comfy/output/vewd" spellcheck="false">
             <button class="v2-heart-btn v2-heart-toggle" title="Heart selected (Spacebar)">♥</button>
             <button id="vewd2-export" title="Export hearted (or selected) to folder">export</button>
         </div>
