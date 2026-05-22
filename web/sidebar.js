@@ -3,6 +3,12 @@ import { api } from "../../scripts/api.js";
 
 console.log("[Vewd2] extension loaded");
 
+// Load model-viewer web component for 3D preview (same CDN as vewd)
+const mvScript = document.createElement("script");
+mvScript.type = "module";
+mvScript.src = "https://ajax.googleapis.com/ajax/libs/model-viewer/4.0.0/model-viewer.min.js";
+document.head.appendChild(mvScript);
+
 const PANEL_ID = "vewd2-panel";
 const HANDLE_W = 20;
 const PANEL_W_DEFAULT = 440;
@@ -147,6 +153,78 @@ styleEl.textContent = `
     }
     #${PANEL_ID} .v2-preview .v2-placeholder .pi {
         font-size: 36px; display: block; margin-bottom: 10px; color: #444;
+    }
+
+    /* Audio player — PNG waveform + progress overlay + playhead, matching vewd */
+    .v2-audio-preview {
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+        width: 100%; height: 100%;
+        padding: 0 0 12px 0;
+        box-sizing: border-box;
+        cursor: default;
+    }
+    .v2-audio-preview .v2-waveform-wrap {
+        position: relative;
+        width: 100%;
+        border-radius: 6px;
+        overflow: hidden;
+        cursor: pointer;
+    }
+    .v2-audio-preview .v2-waveform-wrap img {
+        width: 100%;
+        display: block;
+        min-height: 120px;
+    }
+    .v2-audio-preview .v2-waveform-progress {
+        position: absolute; top: 0; left: 0;
+        height: 100%; width: 0%;
+        background: rgba(255,255,255,0.08);
+        pointer-events: none;
+    }
+    .v2-audio-preview .v2-waveform-playhead {
+        position: absolute; top: 0; left: 0%;
+        height: 100%; width: 2px;
+        background: rgba(255,255,255,0.5);
+        pointer-events: none;
+    }
+    .v2-audio-preview .v2-audio-controls {
+        display: flex; align-items: center; gap: 12px;
+        margin-top: 12px;
+        color: #888; font-size: 13px;
+    }
+    .v2-audio-preview .v2-audio-controls button {
+        background: #222; border: 1px solid #333;
+        color: #ccc;
+        padding: 6px 14px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 13px;
+    }
+    .v2-audio-preview .v2-audio-controls button:hover { background: #333; }
+
+    /* 3D model + splat preview */
+    #${PANEL_ID} .v2-preview model-viewer,
+    .v2-fullscreen model-viewer {
+        width: 100%; height: 100%;
+        --poster-color: #444;
+        background-color: #1a1a1a;
+    }
+    #${PANEL_ID} .v2-preview iframe.v2-splat-viewer,
+    .v2-fullscreen iframe.v2-splat-viewer {
+        width: 100%; height: 100%;
+        border: none;
+        background: #1a1a1a;
+    }
+    .v2-fullscreen model-viewer,
+    .v2-fullscreen iframe.v2-splat-viewer {
+        width: calc(100vw - 64px) !important;
+        height: calc(100vh - 64px) !important;
+        max-width: none !important; max-height: none !important;
+    }
+    .v2-fullscreen .v2-audio-preview {
+        width: min(720px, calc(100vw - 64px));
+        height: auto;
     }
 
     #${PANEL_ID} .v2-hsplit {
@@ -421,6 +499,13 @@ function renderTile(entry, index) {
         inner = `<video src="${entry.url}" muted preload="metadata"></video><span class="v2-badge">vid</span>`;
     } else if (entry.mediaType === "audio") {
         inner = `<div class="v2-icon"><span class="pi pi-volume-up"></span></div><span class="v2-badge">aud</span>`;
+        queueMicrotask(() => {
+            generateWaveformClient(entry.url, entry.filename).then(dataUrl => {
+                if (!tile.isConnected) return;
+                const icon = tile.querySelector(".v2-icon");
+                if (icon) icon.outerHTML = `<img src="${dataUrl}" alt="" loading="lazy">`;
+            }).catch(() => {});
+        });
     } else if (entry.mediaType === "splat") {
         inner = `<div class="v2-icon"><span class="pi pi-cloud"></span></div><span class="v2-badge">splat</span>`;
     } else {
@@ -681,15 +766,177 @@ function getSelectedPayload() {
 function renderPreview(entry) {
     const pv = document.querySelector(`#${PANEL_ID} .v2-preview`);
     if (!pv) return;
-    if (entry.mediaType === "image") {
-        pv.innerHTML = `<img src="${entry.url}" alt="${entry.filename}">`;
-    } else if (entry.mediaType === "video") {
-        pv.innerHTML = `<video src="${entry.url}" controls autoplay loop muted></video>`;
-    } else {
-        const icon = entry.mediaType === "audio" ? "pi-volume-up"
-            : entry.mediaType === "splat" ? "pi-cloud" : "pi-box";
-        pv.innerHTML = `<div class="v2-placeholder"><span class="pi ${icon}"></span>${entry.filename}<br><span style="font-size:11px;color:#444;">${entry.mediaType} preview not yet wired</span></div>`;
+    mountMediaPreview(pv, entry);
+}
+
+// Waveform color palette — matches vewd's WAVEFORM_COLORS
+const WAVEFORM_COLORS = [
+    [70, 130, 200],   // blue
+    [200, 75, 100],   // pink
+    [70, 190, 120],   // green
+    [200, 160, 60],   // gold
+    [140, 90, 200],   // purple
+    [200, 110, 50],   // orange
+    [60, 170, 170],   // cyan
+    [200, 65, 65],    // red
+];
+
+function hashString(str) {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        hash = ((hash << 5) - hash) + str.charCodeAt(i);
+        hash |= 0;
     }
+    return Math.abs(hash);
+}
+
+const _waveformCache = new Map();  // url -> dataURL
+
+// Generate waveform PNG client-side via Web Audio API (port of vewd's generateWaveformClient)
+async function generateWaveformClient(audioUrl, filename, width = 800, height = 200) {
+    if (_waveformCache.has(audioUrl)) return _waveformCache.get(audioUrl);
+    const response = await fetch(audioUrl);
+    const arrayBuffer = await response.arrayBuffer();
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+    audioCtx.close();
+
+    const samples = audioBuffer.getChannelData(0);
+    const peak = samples.reduce((max, s) => Math.max(max, Math.abs(s)), 0) || 1.0;
+
+    const binSize = Math.max(1, Math.floor(samples.length / width));
+    const bins = Math.floor(samples.length / binSize);
+    const maxes = new Float32Array(bins);
+    const mins = new Float32Array(bins);
+    for (let i = 0; i < bins; i++) {
+        let max = -1, min = 1;
+        for (let j = 0; j < binSize; j++) {
+            const s = samples[i * binSize + j] / peak;
+            if (s > max) max = s;
+            if (s < min) min = s;
+        }
+        maxes[i] = max;
+        mins[i] = min;
+    }
+
+    const color = WAVEFORM_COLORS[hashString(filename) % WAVEFORM_COLORS.length];
+    const canvas = document.createElement("canvas");
+    canvas.width = width; canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "rgb(17, 17, 17)";
+    ctx.fillRect(0, 0, width, height);
+    const mid = height / 2;
+    ctx.strokeStyle = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
+    ctx.lineWidth = 1;
+    for (let x = 0; x < Math.min(bins, width); x++) {
+        const yTop = Math.round(mid - maxes[x] * mid * 0.75);
+        const yBot = Math.round(mid - mins[x] * mid * 0.75);
+        ctx.beginPath();
+        ctx.moveTo(x, yTop);
+        ctx.lineTo(x, yBot);
+        ctx.stroke();
+    }
+    ctx.strokeStyle = "rgb(40, 40, 40)";
+    ctx.beginPath();
+    ctx.moveTo(0, mid);
+    ctx.lineTo(width - 1, mid);
+    ctx.stroke();
+
+    const dataUrl = canvas.toDataURL("image/png");
+    _waveformCache.set(audioUrl, dataUrl);
+    return dataUrl;
+}
+
+// Render preview content for any media type. Used by both side panel and fullscreen.
+function mountMediaPreview(container, entry) {
+    if (entry.mediaType === "image") {
+        container.innerHTML = `<img src="${entry.url}" alt="${entry.filename}">`;
+    } else if (entry.mediaType === "video") {
+        container.innerHTML = `<video src="${entry.url}" controls autoplay loop muted></video>`;
+    } else if (entry.mediaType === "audio") {
+        mountAudioPlayer(container, entry);
+    } else if (entry.mediaType === "model") {
+        container.innerHTML = `<model-viewer src="${entry.url}" camera-controls auto-rotate shadow-intensity="1"></model-viewer>`;
+    } else if (entry.mediaType === "splat") {
+        mountSplatViewer(container, entry);
+    } else {
+        container.innerHTML = `<div class="v2-placeholder"><span class="pi pi-box"></span>${entry.filename}<br><span style="font-size:11px;color:#444;">${entry.mediaType} preview not supported</span></div>`;
+    }
+}
+
+function mountAudioPlayer(container, entry) {
+    container.innerHTML = `
+        <div class="v2-audio-preview">
+            <div class="v2-waveform-wrap" data-audio-seek>
+                <img src="" style="display:none">
+                <div class="v2-waveform-progress"></div>
+                <div class="v2-waveform-playhead"></div>
+            </div>
+            <div class="v2-audio-controls">
+                <button data-audio-play>▶ Play</button>
+                <span data-audio-time>0:00 / --:--</span>
+            </div>
+            <audio src="${entry.url}" preload="auto"></audio>
+        </div>
+    `;
+    const root = container.querySelector(".v2-audio-preview");
+    const wfImg = root.querySelector(".v2-waveform-wrap img");
+    const waveWrap = root.querySelector("[data-audio-seek]");
+    const progress = root.querySelector(".v2-waveform-progress");
+    const playhead = root.querySelector(".v2-waveform-playhead");
+    const playBtn = root.querySelector("[data-audio-play]");
+    const timeSpan = root.querySelector("[data-audio-time]");
+    const audio = root.querySelector("audio");
+
+    generateWaveformClient(entry.url, entry.filename).then(dataUrl => {
+        wfImg.src = dataUrl;
+        wfImg.style.display = "";
+    }).catch(err => console.warn("[Vewd2] waveform generation failed:", err));
+
+    const fmt = (s) => { const m = Math.floor(s / 60); return `${m}:${String(Math.floor(s % 60)).padStart(2, "0")}`; };
+
+    audio.addEventListener("loadedmetadata", () => {
+        timeSpan.textContent = `0:00 / ${fmt(audio.duration)}`;
+    });
+    audio.addEventListener("timeupdate", () => {
+        const pct = audio.duration ? (audio.currentTime / audio.duration * 100) : 0;
+        progress.style.width = pct + "%";
+        playhead.style.left = pct + "%";
+        timeSpan.textContent = `${fmt(audio.currentTime)} / ${fmt(audio.duration || 0)}`;
+    });
+    audio.addEventListener("ended", () => { playBtn.textContent = "▶ Play"; });
+    playBtn.onclick = (e) => {
+        e.stopPropagation();
+        if (audio.paused) { audio.play(); playBtn.textContent = "⏸ Pause"; }
+        else { audio.pause(); playBtn.textContent = "▶ Play"; }
+    };
+    waveWrap.onclick = (e) => {
+        e.stopPropagation();
+        const rect = waveWrap.getBoundingClientRect();
+        const pct = (e.clientX - rect.left) / rect.width;
+        if (audio.duration) audio.currentTime = pct * audio.duration;
+    };
+    root.addEventListener("click", (e) => e.stopPropagation());
+    root.addEventListener("dblclick", (e) => e.stopPropagation());
+}
+
+function mountSplatViewer(container, entry) {
+    container.innerHTML = `<iframe class="v2-splat-viewer" src="/extensions/vewdtab/splat-viewer.html"></iframe>`;
+    const iframe = container.querySelector("iframe.v2-splat-viewer");
+    iframe.addEventListener("load", () => {
+        fetch(entry.url)
+            .then(r => r.arrayBuffer())
+            .then(buffer => {
+                iframe.contentWindow.postMessage({
+                    type: "LOAD_MESH_DATA",
+                    data: buffer,
+                    filename: entry.filename,
+                    extrinsics: null,
+                    intrinsics: null,
+                }, "*");
+            })
+            .catch(err => console.error("[Vewd2] failed to load splat data:", err));
+    }, { once: true });
 }
 
 function updateCount() {
@@ -743,9 +990,8 @@ function openFullscreen() {
         });
     }
     const content = _fsEl.querySelector(".v2-fs-content");
-    if (entry.mediaType === "image") content.innerHTML = `<img src="${entry.url}">`;
-    else if (entry.mediaType === "video") content.innerHTML = `<video src="${entry.url}" controls autoplay loop></video>`;
-    else content.innerHTML = `<div style="color:#888;text-align:center;">${entry.mediaType} — fullscreen not yet wired</div>`;
+    if (entry.mediaType === "video") content.innerHTML = `<video src="${entry.url}" controls autoplay loop></video>`;
+    else mountMediaPreview(content, entry);
     _fsEl.querySelector(".v2-fs-name").textContent = entry.filename;
     _fsEl.classList.remove("hidden");
 }
