@@ -9,6 +9,9 @@ mvScript.type = "module";
 mvScript.src = "https://ajax.googleapis.com/ajax/libs/model-viewer/4.0.0/model-viewer.min.js";
 document.head.appendChild(mvScript);
 
+const EXT_BASE = new URL(".", import.meta.url).pathname;
+const SPLAT_VIEWER_URL = EXT_BASE + "splat-viewer.html";
+
 const PANEL_ID = "vewd2-panel";
 const HANDLE_W = 20;
 const PANEL_W_DEFAULT = 440;
@@ -85,6 +88,11 @@ styleEl.textContent = `
     body.vewd2-resizing .graph-canvas-container,
     body.vewd2-resizing .litegraph.litegraph-canvas { transition: none !important; }
 
+    body.vewd2-resizing iframe,
+    body.vewd2-resizing model-viewer,
+    body.vewd2-resizing-h iframe,
+    body.vewd2-resizing-h model-viewer { pointer-events: none !important; }
+
     #${PANEL_ID} {
         position: fixed; top: 0; right: 0;
         width: var(--vewd2-w); height: 100vh;
@@ -137,7 +145,6 @@ styleEl.textContent = `
         border-bottom: 1px solid #222;
         padding: 14px;
         box-sizing: border-box;
-        cursor: zoom-in;
     }
     #${PANEL_ID} .v2-preview img,
     #${PANEL_ID} .v2-preview video {
@@ -429,7 +436,7 @@ document.head.appendChild(styleEl);
 const VIDEO_EXTS = [".mp4", ".webm", ".mov", ".avi", ".mkv"];
 const AUDIO_EXTS = [".mp3", ".wav", ".ogg", ".flac", ".aac"];
 const MODEL_EXTS = [".glb", ".gltf", ".obj", ".stl"];
-const SPLAT_EXTS = [".ply", ".splat"];
+const SPLAT_EXTS = [".ply", ".splat", ".spz", ".ksplat"];
 
 function detectType(filename) {
     const i = filename.lastIndexOf(".");
@@ -452,7 +459,7 @@ function viewURL(item) {
     return api.apiURL(`/view?${params.toString()}`);
 }
 
-function addMedia(item, fallbackType = "image") {
+function addMedia(item, fallbackType = "image", thumbnail = null) {
     const key = `${item.filename}|${item.subfolder || ""}|${item.type || "temp"}`;
     if (state.seen.has(key)) return;
     state.seen.add(key);
@@ -466,6 +473,7 @@ function addMedia(item, fallbackType = "image") {
         type: item.type || "temp",
         mediaType: type,
         url,
+        thumbnail,
     };
 
     // Newest first — unshift items and bump every stored index by 1.
@@ -507,9 +515,15 @@ function renderTile(entry, index) {
             }).catch(() => {});
         });
     } else if (entry.mediaType === "splat") {
-        inner = `<div class="v2-icon"><span class="pi pi-cloud"></span></div><span class="v2-badge">splat</span>`;
+        const fallback = `<div class=&quot;v2-icon&quot;><span class=&quot;pi pi-cloud&quot;></span></div>`;
+        inner = entry.thumbnail
+            ? `<img src="${entry.thumbnail}" alt="" loading="lazy" onerror="this.outerHTML='${fallback}'"><span class="v2-badge">splat</span>`
+            : `<div class="v2-icon"><span class="pi pi-cloud"></span></div><span class="v2-badge">splat</span>`;
     } else {
-        inner = `<div class="v2-icon"><span class="pi pi-box"></span></div><span class="v2-badge">3d</span>`;
+        const fallback = `<div class=&quot;v2-icon&quot;><span class=&quot;pi pi-box&quot;></span></div>`;
+        inner = entry.thumbnail
+            ? `<img src="${entry.thumbnail}" alt="" loading="lazy" onerror="this.outerHTML='${fallback}'"><span class="v2-badge">3d</span>`
+            : `<div class="v2-icon"><span class="pi pi-box"></span></div><span class="v2-badge">3d</span>`;
     }
     tile.innerHTML = inner;
     tile.addEventListener("click", (e) => handleTileClick(e, parseInt(tile.dataset.index, 10)));
@@ -921,7 +935,7 @@ function mountAudioPlayer(container, entry) {
 }
 
 function mountSplatViewer(container, entry) {
-    container.innerHTML = `<iframe class="v2-splat-viewer" src="/extensions/vewdtab/splat-viewer.html"></iframe>`;
+    container.innerHTML = `<iframe class="v2-splat-viewer" src="${SPLAT_VIEWER_URL}"></iframe>`;
     const iframe = container.querySelector("iframe.v2-splat-viewer");
     iframe.addEventListener("load", () => {
         fetch(entry.url)
@@ -1078,7 +1092,7 @@ function buildPanel() {
     panel.querySelector("#vewd2-clear").addEventListener("click", clearAll);
     panel.querySelector("#vewd2-preview-toggle").addEventListener("click", togglePreviewCollapsed);
     panel.querySelectorAll(".v2-heart-toggle").forEach(b => b.addEventListener("click", heartTargets));
-    panel.querySelector(".v2-preview").addEventListener("click", () => {
+    panel.querySelector(".v2-preview").addEventListener("dblclick", () => {
         if (state.focus >= 0) openFullscreen();
     });
     panel.querySelector("#vewd2-download").addEventListener("click", doDownload);
@@ -1172,9 +1186,58 @@ function togglePanel() {
     setTimeout(() => window.dispatchEvent(new Event("resize")), 220);
 }
 
+let lastPromptData = null;
+
+const _origFetchApi = api.fetchApi.bind(api);
+api.fetchApi = function (url, options, ...rest) {
+    if (typeof url === "string" && url.endsWith("/prompt") && options?.method === "POST") {
+        try {
+            const body = JSON.parse(options.body);
+            if (body.prompt) lastPromptData = body.prompt;
+        } catch (e) {}
+    }
+    return _origFetchApi(url, options, ...rest);
+};
+
+const IMAGE_EXTS = [".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"];
+
+function findImageForNode(prompt, nodeId) {
+    const visited = new Set();
+    const queue = [String(nodeId)];
+    while (queue.length) {
+        const id = queue.shift();
+        if (visited.has(id)) continue;
+        visited.add(id);
+        const node = prompt[id];
+        if (!node) continue;
+        const img = node.inputs?.image;
+        if (typeof img === "string" && !Array.isArray(img)) {
+            const ext = img.slice(img.lastIndexOf(".")).toLowerCase();
+            if (IMAGE_EXTS.includes(ext)) {
+                const sep = Math.max(img.lastIndexOf("/"), img.lastIndexOf("\\"));
+                const filename = sep >= 0 ? img.slice(sep + 1) : img;
+                const subfolder = sep >= 0 ? img.slice(0, sep).replace(/\\/g, "/") : "";
+                const params = new URLSearchParams({ filename, subfolder, type: "input", t: String(Date.now()) });
+                return api.apiURL(`/view?${params.toString()}`);
+            }
+        }
+        for (const val of Object.values(node.inputs || {})) {
+            if (Array.isArray(val) && val.length === 2) queue.push(String(val[0]));
+        }
+    }
+    return null;
+}
+
 function handleExecuted({ detail }) {
     const output = detail?.output;
     if (!output) return;
+
+    let sourceImage = null;
+    try {
+        if (lastPromptData && detail?.node) {
+            sourceImage = findImageForNode(lastPromptData, detail.node);
+        }
+    } catch (e) { console.warn("[Vewd2] thumbnail lookup failed:", e); }
 
     if (output.images) output.images.forEach(i => addMedia(i, "image"));
 
@@ -1207,7 +1270,7 @@ function handleExecuted({ detail }) {
                 const subfolder = m.includes("/") ? m.slice(0, m.lastIndexOf("/")) : "";
                 m = { filename, subfolder, type: "output" };
             }
-            if (m?.filename) addMedia(m, "model");
+            if (m?.filename) addMedia(m, "model", sourceImage);
         });
     });
 
@@ -1217,7 +1280,7 @@ function handleExecuted({ detail }) {
             if (typeof p === "string" && p.length > 0) {
                 const filename = p.split(/[\/\\]/).pop();
                 const subfolder = p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "";
-                addMedia({ filename, subfolder, type: "output" }, "splat");
+                addMedia({ filename, subfolder, type: "output" }, "splat", sourceImage);
             }
         });
     }
