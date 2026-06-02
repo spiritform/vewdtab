@@ -90,8 +90,10 @@ styleEl.textContent = `
 
     body.vewd2-resizing iframe,
     body.vewd2-resizing model-viewer,
+    body.vewd2-resizing video,
     body.vewd2-resizing-h iframe,
-    body.vewd2-resizing-h model-viewer { pointer-events: none !important; }
+    body.vewd2-resizing-h model-viewer,
+    body.vewd2-resizing-h video { pointer-events: none !important; }
 
     #${PANEL_ID} {
         position: fixed; top: 0; right: 0;
