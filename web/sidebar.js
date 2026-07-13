@@ -1040,10 +1040,10 @@ function getFolderValue() {
 }
 
 async function doExport() {
-    // Priority: hearted > multi-selection > focus
+    // Priority: selection > hearted (selection is what the user actively clicked)
     let items = [];
-    if (state.tagged.size > 0) items = getTaggedPayload();
-    else if (state.selected.size > 0) items = getSelectedPayload();
+    if (state.selected.size > 0) items = getSelectedPayload();
+    else if (state.tagged.size > 0) items = getTaggedPayload();
     if (items.length === 0) return showToast("No items to export");
     const folder = getFolderValue();
     const r = await fetch("/vewd2/export", {
