@@ -624,7 +624,8 @@ function moveSelection(direction) {
 
 function tileVisible(mediaType, index) {
     const f = state.filter;
-    if (f === "all" || f === "hearts") return true;
+    if (f === "all") return true;
+    if (f === "hearts") return state.tagged.has(index);
     return mediaType === f;
 }
 
@@ -1081,7 +1082,7 @@ function buildPanel() {
             <button data-filter="audio">aud</button>
             <button data-filter="model">3d</button>
             <button data-filter="splat">splat</button>
-            <button id="vewd2-heart" class="v2-heart-btn v2-heart-toggle" title="Heart selected (Spacebar)">♥ <span class="v2-heart-count">0</span></button>
+            <button id="vewd2-heart" class="v2-heart-btn" data-filter="hearts" title="Show hearted only">♥ <span class="v2-heart-count">0</span></button>
             <button id="vewd2-clear" title="Clear all media">clear</button>
             <span class="v2-count"></span>
             <span class="v2-spacer"></span>
