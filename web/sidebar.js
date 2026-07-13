@@ -1075,7 +1075,6 @@ function buildPanel() {
         </div>
         <div class="v2-grid-area"><div class="v2-grid"></div></div>
         <div class="v2-toolbar">
-            <span class="v2-count"></span>
             <button data-filter="all" class="active">all</button>
             <button data-filter="image">img</button>
             <button data-filter="video">vid</button>
@@ -1084,6 +1083,7 @@ function buildPanel() {
             <button data-filter="splat">splat</button>
             <button id="vewd2-heart" class="v2-heart-btn v2-heart-toggle" title="Heart selected (Spacebar)">♥ <span class="v2-heart-count">0</span></button>
             <button id="vewd2-clear" title="Clear all media">clear</button>
+            <span class="v2-count"></span>
             <span class="v2-spacer"></span>
             <button id="vewd2-download" title="Download selected"><span class="pi pi-download"></span></button>
         </div>
