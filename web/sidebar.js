@@ -303,6 +303,7 @@ styleEl.textContent = `
     }
     #${PANEL_ID} .v2-tile:hover { border-color: #555; }
     #${PANEL_ID} .v2-tile.selected { border-color: #fff; }
+    #${PANEL_ID}.v2-inactive .v2-tile.selected { border-color: #666; }
     #${PANEL_ID} .v2-tile img,
     #${PANEL_ID} .v2-tile video {
         width: 100%; height: 100%; object-fit: cover; display: block;
@@ -1151,6 +1152,17 @@ function buildPanel() {
     });
     panel.querySelector("#vewd2-export").addEventListener("click", doExport);
 
+    // Panel is "active" only when it was the last thing clicked, so Delete
+    // aimed at graph nodes never removes panel items.
+    let panelActive = false;
+    document.addEventListener("pointerdown", (e) => {
+        const inside = !!e.target.closest?.(`#${PANEL_ID}`) || !!(_fsEl && _fsEl.contains(e.target));
+        if (panelActive !== inside) {
+            panelActive = inside;
+            panel.classList.toggle("v2-inactive", !inside);
+        }
+    }, true);
+
     // Keyboard shortcuts
     document.addEventListener("keydown", (e) => {
         if (e.code === "Escape") {
@@ -1159,6 +1171,7 @@ function buildPanel() {
         if (!panel.classList.contains("open")) return;
         const tag = document.activeElement?.tagName;
         if (tag === "INPUT" || tag === "TEXTAREA") return;
+        if (!panelActive && !(_fsEl && !_fsEl.classList.contains("hidden"))) return;
 
         if (e.code === "Space") {
             e.preventDefault();
