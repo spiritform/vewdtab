@@ -361,6 +361,12 @@ styleEl.textContent = `
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         font-family: ui-monospace, monospace;
     }
+    #${PANEL_ID} .v2-aspect {
+        flex-shrink: 0;
+        font-size: 11px; color: #666;
+        font-family: ui-monospace, monospace;
+    }
+    #${PANEL_ID} .v2-aspect:empty { display: none; }
     #${PANEL_ID} .v2-brand {
         background: #444; color: #fff;
         padding: 3px 8px; border-radius: 3px;
@@ -569,6 +575,41 @@ function setFocus(idx) {
     afterSelectionChanged();
 }
 
+let _aspectToken = 0;
+
+function formatAspect(w, h) {
+    if (!w || !h) return "";
+    const gcd = (a, b) => b ? gcd(b, a % b) : a;
+    const g = gcd(w, h);
+    const rw = w / g, rh = h / g;
+    if (rw <= 64 && rh <= 64) return `${w}×${h} (${rw}:${rh})`;
+    return `${w}×${h} (${(w / h).toFixed(2)}:1)`;
+}
+
+function updateAspectFor(entry) {
+    const token = ++_aspectToken;
+    const el = document.querySelector(`#${PANEL_ID} .v2-aspect`);
+    if (!el) return;
+    el.textContent = "";
+    if (!entry) return;
+    if (entry.mediaType === "image") {
+        const img = new Image();
+        img.onload = () => {
+            if (token !== _aspectToken) return;
+            el.textContent = formatAspect(img.naturalWidth, img.naturalHeight);
+        };
+        img.src = entry.url;
+    } else if (entry.mediaType === "video") {
+        const v = document.createElement("video");
+        v.preload = "metadata";
+        v.onloadedmetadata = () => {
+            if (token !== _aspectToken) return;
+            el.textContent = formatAspect(v.videoWidth, v.videoHeight);
+        };
+        v.src = entry.url;
+    }
+}
+
 function afterSelectionChanged() {
     refreshTileSelection();
     refreshHeartButton();
@@ -577,12 +618,14 @@ function afterSelectionChanged() {
         renderPreview(entry);
         const fn = document.querySelector(`#${PANEL_ID} .v2-filename`);
         if (fn) fn.textContent = entry.filename;
+        updateAspectFor(entry);
         scrollTileIntoView(state.focus);
     } else {
         const pv = document.querySelector(`#${PANEL_ID} .v2-preview`);
         if (pv) pv.innerHTML = `<div class="v2-empty">no media</div>`;
         const fn = document.querySelector(`#${PANEL_ID} .v2-filename`);
         if (fn) fn.textContent = "no selection";
+        updateAspectFor(null);
     }
     syncSelectionToNode();
     if (_fsEl && !_fsEl.classList.contains("hidden")) openFullscreen();
@@ -1065,6 +1108,7 @@ function buildPanel() {
         <div class="v2-resize" title="Drag to resize"></div>
         <div class="v2-folder-row">
             <span class="v2-filename">no selection</span>
+            <span class="v2-aspect"></span>
             <button id="vewd2-preview-toggle" class="v2-icon-btn" title="Hide / show preview"><span class="pi pi-chevron-up"></span></button>
         </div>
         <div class="v2-preview"><div class="v2-empty">no media</div></div>
