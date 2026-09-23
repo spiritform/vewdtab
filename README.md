@@ -55,6 +55,8 @@ To use the selection in a workflow, add the **Vewd Tab** node (found under `imag
 | Ctrl/Cmd + click | Toggle item in selection |
 | Shift + click | Range select |
 
+Shortcuts only apply when the panel was the last thing you clicked — clicking the graph canvas deactivates them (the selection border dims to gray), so deleting a node never deletes a panel item. Click anywhere in the panel to re-arm them.
+
 ## License
 
 MIT
